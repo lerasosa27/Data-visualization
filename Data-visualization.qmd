@@ -1,0 +1,23 @@
+---
+title: "Data-visualization"
+---
+```{r}
+
+library(tidyverse)
+library(ggplot2)
+library(readr)
+library(dplyr)
+
+
+airports_data<- read_delim("C:/Users/laura/OneDrive/Documentos/Data-visualization/Data/global_airport.txt", col_names = FALSE)
+flights_data<- read_csv("C:/Users/laura/OneDrive/Documentos/Data-visualization/Data/flight.csv")
+
+flights <- flights_data [, c(1, 2, 4:16)]
+colnames(flights) <- str_replace(colnames(flights), "\\s", "_")
+flights <- relocate(flights, 12:14, .after = Depreture_Time)
+airports <-airports_data[1:5]
+airports
+flights
+
+```
+
