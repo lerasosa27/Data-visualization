@@ -1,23 +1,365 @@
 ---
 title: "Data-visualization"
 ---
+
 ```{r}
 
 library(tidyverse)
 library(ggplot2)
 library(readr)
 library(dplyr)
+library(forcats)
+library(maps)
+library (lubridate)
+library(sf)
+library(rnaturalearth)
+theme_set(theme_minimal())
+library(viridis)
+
+
 
 
 airports_data<- read_delim("C:/Users/laura/OneDrive/Documentos/Data-visualization/Data/global_airport.txt", col_names = FALSE)
 flights_data<- read_csv("C:/Users/laura/OneDrive/Documentos/Data-visualization/Data/flight.csv")
 
-flights <- flights_data [, c(1, 2, 4:16)]
-colnames(flights) <- str_replace(colnames(flights), "\\s", "_")
-flights <- relocate(flights, 12:14, .after = Depreture_Time)
-airports <-airports_data[1:5]
-airports
+
+```
+
+
+```{r}
+
+flights <- flights_data [, c(1, 2, 4:15)]
+airports <-airports_data[ , c(2, 4:5)]|>
+  filter(!duplicated(X2))
+gworld <- map_data("world")
+coordinates <-airports_data[ , c(2, 4:5, 15:16)]
+
+
+#update column data
+colnames(flights) <- str_replace_all(colnames(flights), "\\s|\\(|\\)", "_")
+colnames(flights) <- str_replace_all(colnames(flights), "1", "fir")
+colnames(flights) <- str_replace_all(colnames(flights), "2", "seco")
+colnames(flights) <- str_replace_all(colnames(flights), "3", "thi")
+colnames(airports) <- c("IATA_code", "city", "country") 
+colnames(coordinates) <- c("IATA_code", "city", "country", "longitude", "latitude") 
+coordinates$group <- as.integer(factor(coordinates$country, levels = unique(coordinates$country)))
+coordinates$group <- as.factor(coordinates$group)
+
+flights$Number_of__Stoppage <- as.numeric(str_extract(flights$Number_of__Stoppage,  "\\d+"))
+flights$Number_of__Stoppage[is.na(flights$Number_of__Stoppage)] <- 0
+flights <- relocate(flights, 13:14, .after = Depreture_Time)
+airports$country <- str_replace_all(airports$country, "UNITED ARAB EMIRATES", "ARAB EMIRATES")
+
+#Changing time formats
+
+total_time <- function(type_time){
+  
+  travel_min <- as.numeric(str_extract(type_time, "(\\d+)(?=m)"))
+  type_time <- round((as.numeric(str_extract(type_time,  "\\d+"))) +(travel_min/60),2)
+  return(type_time)}
+
+flights$Travel__Time <- total_time(flights$Travel__Time)
+flights$first_Stoppage_Waiting_Hour <- total_time(flights$first_Stoppage_Waiting_Hour)
+flights$second_StoppageWaiting_Time <- total_time(flights$second_StoppageWaiting_Time)
+flights$third_Stoppage_Waiting_time <- total_time(flights$third_Stoppage_Waiting_time)
+
+
+flights$Depreture_Time <- str_replace_all(flights$Depreture_Time,"p"," pm")
+flights$Depreture_Time <- str_replace_all(flights$Depreture_Time,"a"," am")
+flights$Arrival_Time <- str_replace_all(flights$Arrival_Time,"p"," pm")
+flights$Arrival_Time <- str_replace_all(flights$Arrival_Time,"a"," am")
+  
+flights$Depreture_Time <- as.POSIXct(flights$Depreture_Time, format = "%I:%M %p")
+flights$Arrival_Time <- as.POSIXct(flights$Arrival_Time, format = "%I:%M %p")
+
+
+#get the city and the country of each airport in the flights table
+
+flights <- left_join(flights, airports, join_by(Depreture__Airport == "IATA_code"))|>
+  filter(!is.na(Depreture__Airport))
+colnames(flights)[15:16]<- c("city_departure", "country_departure")
+flights <- relocate(flights, 15:16, .after = Depreture_Time)
+
+
+flights <- left_join(flights, airports, join_by(Destination_Airport == "IATA_code"))|>
+  filter(!is.na(Destination_Airport))
+colnames(flights)[17:18]<- c("city_destination", "country_destination")
+flights <- relocate(flights, 17:18, .after = Arrival_Time)
+
 flights
+
+
+airports
+
+
+```
+
+ 
+
+
+
+```{r}
+##PRICES PER AIRLINE
+
+#flights|>
+#ggplot(aes(x= Ticket_prize_Doller_, y = fct_lump_n(reorder(Airline_name, Ticket_prize_Doller_), 15)))+
+ # geom_bar(stat = "summary", fun = "mean")+
+
+#  labs(x = "ticket", y = "Airline")
+
+```
+```{r}
+### PRICES PER AIRLINE
+
+
+flights|> filter(!is.na(Airline_name))|> 
+  ggplot(aes(y = Ticket_prize_Doller_,
+             x =  fct_lump_n(as.factor(Airline_name), 8),
+             fill = Number_of__Stoppage,
+             colour = Number_of__Stoppage )) +   
+  geom_violin(alpha = 0.1, trim = FALSE) +
+  geom_point(position = position_jitterdodge(dodge.width = 0.9),
+             alpha = 0.5, show.legend = FALSE)+
+  scale_color_viridis_c(name = "Stops") +
+  guides(fill = "none") +
+  labs(x = "Airline", y = "Ticket price")+
+  scale_y_continuous(labels = scales::dollar_format())
+
+```
+
+
+```{r}
+## AMOUNT OF TICKETS PER AIRLINE
+
+flights|> filter(!is.na(Airline_name))|> 
+ggplot(aes(y = fct_infreq(fct_lump_n(Airline_name, 15))))+
+   geom_bar(fill = viridis::viridis_pal()(16), alpha = 0.8) +
+   labs(title= "Number of tickets per airline", y= NULL, x= NULL)+
+   scale_fill_discrete(name = "Number of stops") +
+    theme(plot.title = element_text(hjust = 0.5, vjust = -1.9))
+
+
+```
+
+```{r}
+
+# TOP 15: AMOUNT OF AIRPORTS PER COUNTRY
+
+top<- airports|> group_by(country)|>
+  summarise(n = n())|>
+  arrange(desc(n))
+
+top<- top[c(1:15),]
+
+top|> 
+ggplot(aes(y = reorder(country, -n), x = n))+
+  geom_bar(stat = "identity", fill = viridis::viridis_pal()(15), alpha = 0.8)+  
+  labs(title= "Number of airports per country",fill = "Number of stops", y= NULL, x= NULL)+
+    theme(plot.title = element_text(hjust = 0.5, vjust = -1.9))
+
+
+```
+
+```{r}
+#Frequency of the trips
+
+flights|> filter(!is.na(country_destination),)|>
+    ggplot(aes(x= fct_infreq(country_departure), fill=  country_destination))+
+  geom_bar(alpha = 0.8)+
+  scale_fill_manual(values = viridis::viridis_pal()(length(unique(flights$country_destination)))) +
+  labs(fill = "Destination country", x = "Departure country", y = NULL)
+
+#heat map
+```
+
+```{r}
+#Prices per number of stops
+
+flights|> filter(!is.na(city_destination), !is.na(city_departure))|>
+  ggplot(aes(x= Ticket_prize_Doller_, 
+               fill = factor(Number_of__Stoppage), 
+               colour = factor (Number_of__Stoppage)))+
+  geom_density(alpha = 0.6)+
+  scale_color_discrete(name = "Number of Stops") +
+  
+  labs(fill = "Number of Stops", x = "Ticket prices")+
+  scale_x_continuous(labels = scales::dollar_format())+
+  scale_fill_manual(values = viridis::viridis_pal()(length(unique(flights$Number_of__Stoppage)))) +
+  theme(legend.position = "top")
+
+#ticket price, length of the trip by number of stops
+```
+
+```{r}
+#Ticket prices per destination
+
+flights|> filter(
+    !is.na(country_destination) & 
+    !is.na(country_departure) & 
+    !(country_destination %in% c("ENGLAND", "FRANCE")))|>
+  ggplot(aes(x = country_destination , 
+             y = Ticket_prize_Doller_, 
+            fill = factor(Number_of__Stoppage)))+
+  geom_boxplot(alpha = 0.8)+
+  theme(legend.position = "bottom",
+        legend.background =
+        element_rect(fill = "white", color = NA))+
+  labs(title= "Ticket prices per destination",fill = "Stops", y= NULL, x= NULL)+
+  scale_fill_manual(values = viridis::viridis_pal()(length(unique(flights$Number_of__Stoppage)))) +
+  scale_y_continuous(labels = scales::dollar_format())+
+   theme(plot.title = element_text(hjust = 0.5, vjust = -1.9))
+
+```
+```{r}
+
+#Relation price and stops to Thailand
+flights|> filter(
+    !is.na(country_destination) & 
+    !is.na(country_departure) & 
+    !(country_destination %in% c("ENGLAND", "FRANCE")),
+    country_destination == "THAILAND")|>
+  ggplot(aes(x = country_departure , 
+             y = Ticket_prize_Doller_, 
+            fill = factor(Number_of__Stoppage)))+
+  geom_boxplot(alpha = 0.8)+
+  theme(legend.position = "bottom",
+        legend.background =
+        element_rect(fill = "white", color = NA))+
+  labs(title= "Ticket prices to Thailand",fill = "Number of stops", y= NULL, x= NULL)+
+  scale_fill_manual(values = viridis::viridis_pal()(length(unique(flights$Number_of__Stoppage)))) +
+  scale_y_continuous(labels = scales::dollar_format())+
+   theme(plot.title = element_text(hjust = 0.5, vjust = -1.9))
+
+
+```
+
+```{r}
+#Relation between the price and the duration of the trip
+
+flights|> 
+ggplot() +
+  aes(x = Travel__Time, 
+      y = Ticket_prize_Doller_,
+      colour = Number_of__Stoppage) +
+  geom_point(alpha = 0.4, size = 3) +
+  scale_color_viridis_c()+
+  scale_y_continuous(labels = scales::dollar_format())+  
+  labs( y = "Ticket price", x = "Duration (hours)", colour = "Stops" )+
+   scale_color_binned(type = "viridis")
+
+#facet by number of stops
+
+```
+```{r}
+airports_per_Country <- airports|> 
+  group_by(country)|>
+  summarise(num_airports = n())
+airports_per_Country
+
+flights_per_destination <- flights_vs_airports|> 
+  group_by(country_destination)|> 
+  summarise(num_flights = n())
+flights_per_destination
+
+airports_vs_destination <- 
+  left_join(flights_per_destination, airports_per_Country, join_by(country_destination == country))
+  airports_vs_destination
+  
+  
+  
+airports_vs_destination|> 
+  filter(!is.na(country_destination))|>
+  ggplot()+
+   aes(x = num_airports, 
+      y = num_flights,
+      color = factor(country_destination) )  +
+  geom_point(size = 6, alpha = 0.8)+
+  labs( color = "Destination", x = "Number of airports", y = "number of flights" )+
+  scale_color_viridis_d()
+
+
+  
+
+
+```
+
+
+
+```{r}
+
+
+flights|> filter(
+    !is.na(country_destination) & 
+    !is.na(country_departure) & 
+    !(country_destination %in% c("ENGLAND", "FRANCE")),
+    country_destination == "THAILAND")|>
+  ggplot(aes(x = Depreture_Time , 
+             y = Ticket_prize_Doller_))+
+  geom_point()+
+  theme(legend.position = "bottom",
+        legend.background =
+        element_rect(fill = "white", color = NA))
+
+```
+
+```{r}
+country_summary<-  coordinates|> 
+  group_by(country)|> 
+  summarise(airport_num = n())
+
+map <- ne_countries(scale = 110, 
+                    returnclass = 'sf', 
+                    continent = c("North America", "Asia", "Europe"))
+
+
+limits_x <- c(-180, 180)
+limits_y <- c(0, 90)
+map |> 
+  ggplot() +
+  geom_sf() +
+  coord_sf(xlim = limits_x,
+           ylim = limits_y)
+
+map |>
+  ggplot() +
+  geom_sf(aes(fill = gdp_md/pop_est)) +
+  coord_sf(xlim = limits_x,
+           ylim = limits_y) +
+  guides(fill = guide_legend(title = "Median GDP/Population"))
+
+
+map_data <- left_join(gworld, country_summary, by = c("region" = "country"))
+
+sf_data <- st_as_sf(coordinates, coords = c("longitude", "latitude"))
+country_summary <- as.data.frame(table(coordinates$country))
+colnames(country_summary) <- c("country", "airport_num")
+sf_airports <- merge(country_summary, sf_data,  by = "country")
+
+sf_airports|> 
+ggplot() +
+  geom_sf(aes(fill = airport_num)) +
+  scale_fill_viridis_c() +
+  theme_minimal()
+
+```
+
+
+
+```{r}
+country_summary<-  coordinates|> 
+  group_by(country)|> 
+  summarise(airport_num = n())
+
+map_data <- left_join(gworld, country_summary, by = c("region" = "country"))
+
+gworld|> filter(lat >= -60)|>
+ggplot() +
+  geom_polygon(aes(x=long, 
+                   y = lat, 
+                   group = group),
+               color = "white")
+
+
 
 ```
 
